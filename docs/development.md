@@ -478,6 +478,19 @@ at ancient `0.0.1-rc.x` lines. "dsh `@latest`" therefore means
 the carets that CLI declares — exactly what a user's
 `npm i @deepseek-ai/dsh@latest` resolves to.
 
+The family does not always publish every package at a CLI release: 0.2.1-rc.2
+shipped without `@deepseek-ai/dsh-invariants` (still at 0.2.0-rc.2). Pin each
+package **exactly** to the tracked version when it exists, and to a caret on its
+highest published version otherwise — a caret on `0.x` is minor-bounded, so
+`^0.2.0-rc.2` still accepts a 0.2.1 runtime, which is exactly the check dsh's
+own compatibility gate performs. Exact pins matter on the rc line: `^0.2.1-rc.2`
+also accepts 0.2.1-rc.3, and upstream published rc.3 sub-packages (including
+`dsh-client-connection`) that require `dsh-scope@0.2.1-rc.3` exactly while the
+CLI's `latest` tag was still rc.2, so a caret resolution produced bundles dsh's
+gate rejected. `scripts/pin-dsh-latest.mjs` does this (both compat workflows
+call it instead of rewriting ranges by hand) and `checkVersionTrack()` accepts
+an exact tracked version or a caret that accepts it.
+
 Verification:
 - `ci.yml` runs the gates on every push against the lockfile-pinned set;
 - the `Canary (main vs dsh@latest)` workflow pins the CLI to the npm `@latest`
