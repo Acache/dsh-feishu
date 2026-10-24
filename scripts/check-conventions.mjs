@@ -188,6 +188,30 @@ function checkMinimumReleaseAge() {
   }
 }
 
+/**
+ * Does `^<version>` accept `target`? Enough of caret semantics for the
+ * `0.x` pre-release lines this repo pins: a caret is minor-bounded for
+ * `0.minor.patch` (patch-bounded only for `0.0.x`), and pre-releases are
+ * compared only within the same major.minor.patch tuple.
+ */
+function caretAccepts(range, target) {
+  const match = /^\^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(range);
+  if (match === null) return false;
+  const [, major, minor, patch, pre] = match;
+  const t = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(target);
+  if (t === null) return false;
+  const [, tmaj, tmin, tpatch, tpre] = t;
+  const base = { major: Number(major), minor: Number(minor), patch: Number(patch) };
+  if (Number(tmaj) !== base.major) return false;
+  if (Number(tmin) !== base.minor) return false;
+  if (base.minor === 0 && Number(tpatch) !== base.patch) return false;
+  if (Number(tpatch) > base.patch) return true;
+  if (Number(tpatch) < base.patch) return false;
+  if (pre === undefined) return true;
+  if (tpre === undefined) return true;
+  return tpre === pre || tpre.localeCompare(pre, 'en', { numeric: true }) > 0;
+}
+
 function checkVersionTrack() {
   const track = loadTrack(ROOT);
   if (track.error) {
@@ -210,9 +234,14 @@ function checkVersionTrack() {
   for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
     if (!name.startsWith('@deepseek-ai/')) continue;
     if (name === '@deepseek-ai/cordis' || name === '@deepseek-ai/schemastery') continue;
-    if (range !== `^${track.latest}` && range !== track.latest) {
+    // The family does not always publish every package at every CLI release
+    // (0.2.1-rc.2 shipped without @deepseek-ai/dsh-invariants), so the range
+    // must merely ACCEPT the tracked version — dsh's own compatibility gate
+    // checks exactly that. A caret on 0.x is minor-bounded, so ^0.2.0-rc.2
+    // accepts 0.2.1-rc.2 while ^0.1.x would not.
+    if (range !== track.latest && !caretAccepts(range, track.latest)) {
       errors.push(
-        `package.json peerDependencies['${name}'] is ${range} but the tracked dsh @latest is ${track.latest} — keep the harness peer ranges on ^${track.latest}`,
+        `package.json peerDependencies['${name}'] is ${range} but the tracked dsh @latest is ${track.latest} — pin ^${track.latest}, or the highest published version the family actually shipped (its caret must accept ${track.latest})`,
       );
     }
   }

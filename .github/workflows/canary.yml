@@ -41,23 +41,7 @@ jobs:
       # to test the combination a user gets.
       - name: Pin the dsh family to the npm @latest CLI (not frozen)
         run: |
-          VERSION="$(npm view @deepseek-ai/dsh@latest version)"
-          echo "dsh @latest = ${VERSION}"
-          V="${VERSION}" node -e "
-            const fs = require('node:fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            const version = process.env.V;
-            for (const section of ['devDependencies', 'peerDependencies']) {
-              for (const name of Object.keys(pkg[section] ?? {})) {
-                if (!name.startsWith('@deepseek-ai/')) continue;
-                // cordis / schemastery are versioned independently (4.x / 3.x).
-                if (name === '@deepseek-ai/cordis' || name === '@deepseek-ai/schemastery') continue;
-                const cli = name === '@deepseek-ai/dsh';
-                pkg[section][name] = cli ? version : '^' + version;
-              }
-            }
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          node scripts/pin-dsh-latest.mjs
           pnpm install --no-frozen-lockfile
           pnpm dedupe
 

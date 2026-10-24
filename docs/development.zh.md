@@ -331,6 +331,16 @@ tag，它们自己的 `latest` 仍停在远古的 `0.0.1-rc.x` 线上。所以
 CLI 自己声明的 caret 解析——这正是用户 `npm i @deepseek-ai/dsh@latest` 得到的
 组合。
 
+上游并不总能把家族里每个包都在同一个 CLI 版本发齐：0.2.1-rc.2 就没发
+`@deepseek-ai/dsh-invariants`（仍停在 0.2.0-rc.2）。因此版本存在时**精确固定**到
+跟踪版本，不存在时用该包已发布最高版本的 caret——`0.x` 的 caret 按 minor 封顶，
+`^0.2.0-rc.2` 同样接受 0.2.1 运行时，而这正是 dsh 自身兼容闸门检查的东西。
+rc 线上必须精确固定：`^0.2.1-rc.2` 会接受 0.2.1-rc.3，而上游发布了要求
+`dsh-scope@0.2.1-rc.3` 精确版本的 rc.3 子包（含 `dsh-client-connection`），
+当时 CLI 的 `latest` 还是 rc.2，caret 解析出来的 bundle 会被 dsh 闸门拒绝。
+`scripts/pin-dsh-latest.mjs` 统一做这件事（两个 compat workflow 都调它，不再手写
+范围），`checkVersionTrack()` 接受"精确跟踪版本"或"caret 接受跟踪版本"。
+
 验证方式：
 - `ci.yml` 每次 push 都用 lockfile 锁定的组合跑门禁；
 - `Canary (main vs dsh@latest)` workflow 每天把 CLI 钉到 npm `@latest` 版本并

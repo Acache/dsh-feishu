@@ -88,10 +88,18 @@ branch so the release PR is the thing the maintainer reviews (see
 docs/development.md → "Releasing").
 
 1. `git worktree add -b feat/dsh-adapt-<latest> _dev/dsh-feishu-adapt-<latest> main`.
-2. Bump the family to the new `@latest`: `@deepseek-ai/dsh` pinned EXACT to it,
-   the rest caret `^<version>`, and add any **new peer packages** the fresh CLI
-   requires (e.g. `@deepseek-ai/dsh-invariants`, `dsh-scope`, `dsh-timeout`) to
-   dev/peer deps.
+2. Bump the family to the new `@latest` with
+   `node scripts/pin-dsh-latest.mjs` (the same script both compat workflows
+   call): the CLI and every family package are pinned **EXACTLY** to it. Carets
+   are wrong on the rc line — `^0.2.1-rc.2` also accepts 0.2.1-rc.3, and rc.3
+   sub-packages (`dsh-client-connection` among them) require
+   `dsh-scope@0.2.1-rc.3` exactly while the CLI's `latest` tag was still rc.2,
+   so the profile resolved bundles dsh's gate rejected. The family also skips
+   packages at a release (0.2.1-rc.2 shipped without
+   `@deepseek-ai/dsh-invariants`): for those the script falls back to a caret on
+   the highest published version, which still accepts the newer runtime. Add any
+   **new peer packages** the fresh CLI requires (e.g. `dsh-scope`,
+   `dsh-timeout`) to dev/peer deps.
 3. Refresh the lockfile against the official registry (`pnpm install`, never
    frozen), then `pnpm dedupe` and confirm every `@deepseek-ai/*` package
    resolves to ONE version (`pnpm run check` enforces it).
