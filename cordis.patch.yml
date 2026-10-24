@@ -57,6 +57,13 @@
     # (agent-initiated turn path in the bridge). dsh-base does not mount it.
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
+    # dsh 0.2.1 split the reminder TOOLS out of `dsh-schedule` (which keeps
+    # owning the service/storage) into this bundle; without it the service is
+    # live but `schedule_create` is an unknown tool and the agent cannot set a
+    # reminder at all.
+    - id: tool-schedule
+      name: '@deepseek-ai/dsh-tool-schedule'
+
 
     # Durable workspace registry (session archive/restore, web-visible).
     # The workspace registry persists through the storage domain, so a
