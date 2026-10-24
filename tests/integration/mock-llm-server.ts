@@ -205,6 +205,29 @@ function writeScriptedBody(
   }
 }
 
+/**
+ * Whether `body` is dsh's internal session-title completion.
+ *
+ * It is a normal Messages call with no `tools` field — like a turn request, so
+ * tools cannot identify it — but its first user text is the title instruction
+ * ("Generate the session title from this JSON array of human messages: …").
+ * Upstream 0.2.1 requires that completion's answer to be text only, so it must
+ * never be served from the scripted queue: a scripted tool call failed the
+ * title AND shifted every scripted turn after it.
+ */
+function isTitleRequest(body: unknown): boolean {
+  const messages = (body as { messages?: unknown } | undefined)?.messages;
+  if (!Array.isArray(messages)) return false;
+  return messages.some((message) => {
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return false;
+    return content.some((block) => {
+      const text = (block as { text?: unknown }).text;
+      return typeof text === 'string' && text.startsWith('Generate the session title');
+    });
+  });
+}
+
 /** Whether the script produces a tool call (drives the `tool_use` stop reason). */
 function hasToolCall(script: readonly MockScriptChunk[] | undefined): boolean {
   return script?.some((part) => part.toolCall !== undefined) ?? false;
@@ -240,56 +263,81 @@ export async function startMockLlmServer(): Promise<MockLlmServer> {
       const bodyChunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => bodyChunks.push(chunk));
       req.on('end', () => {
+        let body: unknown;
         try {
-          const body = JSON.parse(Buffer.concat(bodyChunks).toString('utf8'));
+          body = JSON.parse(Buffer.concat(bodyChunks).toString('utf8'));
           lastBody = body;
           bodies.push(body);
         } catch {
           lastBody = undefined;
         }
+        respond(body);
       });
       // A scripted error responds 500 BEFORE any streaming headers — writing
       // them first would make the 500 throw ("headers already sent") and hang
       // the adapter on an open body.
-      const script = nextScript();
-      const failing = script?.find((part) => part.error !== undefined);
-      if (failing !== undefined) {
-        res.writeHead(500, { 'content-type': 'text/plain' });
-        res.end(failing.error ?? 'mock LLM error');
-        return;
-      }
-      res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        connection: 'keep-alive',
-      });
-      const writer = createMessagesWriter(res, 'deepseek-v4-flash');
-      writer.start();
-      if (hold) {
-        hold = false;
-        // Stream one leading chunk so the agent is running WITH content,
-        // then keep the body open until the test releases it. If the agent
-        // cancels first, its abort closes the turn regardless.
-        writer.append({ content: 'starting…' });
-        releaseHold = () => {
-          // The agent may have aborted; writing to a dead body is a no-op.
-          if (res.destroyed || res.writableEnded) return;
-          writeScriptedBody(writer, script);
+      function respond(body: unknown): void {
+        if (isTitleRequest(body)) {
+          // Upstream's title generation requires a text-only answer (0.2.1
+          // rejects anything else), and it is an internal completion, not a
+          // turn: answering it from the script queue fed it a tool call, failed
+          // the title and shifted every scripted turn that followed.
+          res.writeHead(200, {
+            'content-type': 'text/event-stream',
+            'cache-control': 'no-cache',
+            connection: 'keep-alive',
+          });
+          const writer = createMessagesWriter(res, 'deepseek-v4-flash');
+          writer.start();
+          writer.append({ content: 'Session title' });
           writer.closeBlocks();
-          writer.finish(hasToolCall(script) ? 'tool_use' : 'end_turn');
+          writer.finish('end_turn');
           res.end();
-        };
-        // Signal any waiting `waitForHold()` — the request is in flight and
-        // the test may now drive stop/panel actions deterministically.
-        heldResolve?.();
-        heldResolve = undefined;
-        heldPromise = undefined;
-        return;
+          return;
+        }
+        const script = nextScript();
+        const failing = script?.find((part) => part.error !== undefined);
+        if (failing !== undefined) {
+          res.writeHead(500, { 'content-type': 'text/plain' });
+          res.end(failing.error ?? 'mock LLM error');
+          return;
+        }
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        const writer = createMessagesWriter(res, 'deepseek-v4-flash');
+        writer.start();
+        if (hold) {
+          hold = false;
+          // Stream one leading chunk so the agent is running WITH content,
+          // then keep the body open until the test releases it. If the agent
+          // cancels first, its abort closes the turn regardless.
+          writer.append({ content: 'starting…' });
+          releaseHold = () => {
+            // The agent may have aborted; writing to a dead body is a no-op.
+            if (res.destroyed || res.writableEnded) return;
+            writeScriptedBody(writer, script);
+            writer.closeBlocks();
+            writer.finish(hasToolCall(script) ? 'tool_use' : 'end_turn');
+            res.end();
+          };
+          // Signal any waiting `waitForHold()` — the request is in flight and
+          // the test may now drive stop/panel actions deterministically.
+          heldResolve?.();
+          heldResolve = undefined;
+          heldPromise = undefined;
+          return;
+        }
+        writeScriptedBody(writer, script);
+        writer.closeBlocks();
+        writer.finish(hasToolCall(script) ? 'tool_use' : 'end_turn');
+        res.end();
       }
-      writeScriptedBody(writer, script);
-      writer.closeBlocks();
-      writer.finish(hasToolCall(script) ? 'tool_use' : 'end_turn');
-      res.end();
+      // `respond` writes the response asynchronously (on body end), so the
+      // handler must stop here — otherwise it falls through and answers 404
+      // before the stream is written (the turn then fails with HTTP_404).
       return;
     }
     if (req.method === 'GET' && url === '/models') {

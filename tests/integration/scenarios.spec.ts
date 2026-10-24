@@ -904,7 +904,11 @@ describe.skipIf(!integrationReady)('scenario integration (real process)', () => 
             },
           },
         ],
-        [{ content: 'Group question done.' }],
+        // Both questions stay UNANSWERED (the case only inspects the cards), so
+        // both ask scripts must come before any answer text: the group turn
+        // suspends on its question, and a queued answer text would otherwise
+        // be served to the p2p turn (dsh 0.2.1 keeps the suspended turn alive
+        // where the script order used to line up by accident).
         [
           {
             toolCall: {
@@ -916,6 +920,7 @@ describe.skipIf(!integrationReady)('scenario integration (real process)', () => 
             },
           },
         ],
+        [{ content: 'Group question done.' }],
         [{ content: 'P2P question done.' }],
       ]);
       await spawnBridge({ FEISHU_MOCK_BOT_OPEN_ID: 'ou_bot' });
