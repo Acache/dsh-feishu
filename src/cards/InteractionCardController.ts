@@ -19,7 +19,15 @@ import type {
   AskQuestionsAnswerLike,
   AskQuestionsRequestLike,
 } from '../bridge.js';
-import type { CardAction, FeishuTransport, SentCard } from '../feishu/types.js';
+import type {
+  CardAction,
+  CardActionResponse,
+  CardJson,
+  CardToast,
+  FeishuTransport,
+  SentCard,
+} from '../feishu/types.js';
+import { t } from '../i18n/index.js';
 import type { SessionMap } from '../session-map.js';
 import { InteractionRegistry } from './interactions.js';
 import {
@@ -55,9 +63,30 @@ export interface InteractionCardHost {
   syncCard(chatId: string): void;
 }
 
+/**
+ * Build a Feishu card-callback response. Applying the card here is the only
+ * reliable in-place update: a separate `message.patch` after an empty ACK can
+ * be overwritten by the client.
+ * @param card - the updated card to apply to the clicked message.
+ * @param toast - optional toast shown to the operator.
+ * @returns the callback response.
+ */
+function cardAck(card: CardJson, toast?: CardToast): CardActionResponse {
+  return {
+    card: { type: 'raw', data: card },
+    ...(toast === undefined ? {} : { toast }),
+  };
+}
+
 /** The interaction card controller. One instance per bridge. */
 export class InteractionCardController {
   private readonly interactions = new InteractionRegistry();
+  /**
+   * Approval cards already returned as the callback ACK, keyed by request id.
+   * The settle handler must not `message.patch` those again: the patch can
+   * race the client applying the ACK and undo the visible decision.
+   */
+  private readonly approvalAckCards = new Map<string, CardJson>();
   /** Multi-select question state per request id (toggle + submit). */
   private readonly questionState = new Map<
     string,
@@ -124,16 +153,19 @@ export class InteractionCardController {
     return new Promise<ApprovalOutcomeLike>((resolve) => {
       this.interactions.register(requestId, chatId, messageId, (outcome) => {
         this.host.logger.debug(`approval ${requestId} settled: ${String(outcome)}`);
-        // Turn the card into its static decided state, deferred out of the
-        // card-callback ACK (botmux rule), then re-assert the streaming card.
         const settled: ApprovalOutcomeLike = outcome as ApprovalOutcomeLike;
-        setTimeout(() => {
-          void this.host.transport
-            .updateCard(messageId, buildApprovalDecidedCard(settled))
-            .catch((error: unknown) => {
+        const decided = buildApprovalDecidedCard(settled);
+        // A card decision already returned `decided` as the callback ACK.
+        // Patching again can race the client applying that ACK, so only
+        // non-callback settlements (abort/timeout) patch the card.
+        const acked = this.approvalAckCards.delete(requestId);
+        if (!acked) {
+          setTimeout(() => {
+            void this.host.transport.updateCard(messageId, decided).catch((error: unknown) => {
               this.host.logger.warn(`approval card settle update failed: ${String(error)}`);
             });
-        }, 0);
+          }, 0);
+        }
         this.host.syncCard(chatId);
         resolve(settled);
       });
@@ -298,28 +330,33 @@ export class InteractionCardController {
    * question-toggle / question-submit / question-cancel). These settle
    * pending interactions; other kinds are ignored (the Bridge routes them).
    * @param action - the normalized card callback.
+   * @returns the updated card for the callback ACK, when one is required.
    */
-  async handleCardAction(action: CardAction): Promise<void> {
+  async handleCardAction(action: CardAction): Promise<CardActionResponse | undefined> {
     switch (action.value.kind) {
       case 'approval': {
         const id = action.value.id;
         const decision = action.value.decision;
-        if (id === undefined || (decision !== 'allow' && decision !== 'reject')) return;
-        this.interactions.resolveOnce(
-          id,
-          action.chatId,
-          action.messageId,
-          decision === 'allow' ? 'allowed-once' : 'rejected',
-        );
-        return;
+        if (id === undefined || (decision !== 'allow' && decision !== 'reject')) return undefined;
+        const outcome = decision === 'allow' ? 'allowed-once' : 'rejected';
+        const card = buildApprovalDecidedCard(outcome);
+        this.approvalAckCards.set(id, card);
+        const settled = this.interactions.resolveOnce(id, action.chatId, action.messageId, outcome);
+        if (!settled) {
+          // Stale callback: the interaction was already settled or the
+          // callback targeted another card/chat. Do not claim the ACK.
+          this.approvalAckCards.delete(id);
+          return undefined;
+        }
+        return cardAck(card, { type: 'success', content: t('card.approval.submittedNote') });
       }
       case 'question': {
         // Single-select: the chosen option label is the answer.
         const id = action.value.id;
         const answer = action.value.answer;
-        if (id === undefined || answer === undefined) return;
+        if (id === undefined || answer === undefined) return undefined;
         this.interactions.resolveOnce(`question-${id}`, action.chatId, action.messageId, answer);
-        return;
+        return undefined;
       }
       case 'question-toggle': {
         // Multi-select: flip one option and re-post the card with
@@ -327,7 +364,7 @@ export class InteractionCardController {
         const id = `question-${action.value.id ?? ''}`;
         const option = action.value.option;
         const state = this.questionState.get(id);
-        if (state === undefined || option === undefined) return;
+        if (state === undefined || option === undefined) return undefined;
         state.selection = state.selection.includes(option)
           ? state.selection.filter((entry) => entry !== option)
           : [...state.selection, option];
@@ -341,22 +378,22 @@ export class InteractionCardController {
         } catch (error: unknown) {
           this.host.logger.warn(`question toggle re-post failed: ${String(error)}`);
         }
-        return;
+        return undefined;
       }
       case 'question-submit': {
         const id = `question-${action.value.id ?? ''}`;
         this.interactions.resolveOnce(id, action.chatId, action.messageId, 'submit');
-        return;
+        return undefined;
       }
       case 'question-cancel': {
         const id = `question-${action.value.id ?? ''}`;
         this.awaitingQuestionAnswers.delete(action.chatId);
         this.interactions.resolveOnce(id, action.chatId, action.messageId, 'cancelled');
-        return;
+        return undefined;
       }
       default:
         // Not an interaction action (streaming/panel) — ignore.
-        return;
+        return undefined;
     }
   }
 }

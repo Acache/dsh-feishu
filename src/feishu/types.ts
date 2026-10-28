@@ -222,6 +222,32 @@ export interface CardAction {
   readonly formValue?: Record<string, string>;
 }
 
+/** Toast shown by Feishu after a card callback response is applied. */
+export interface CardToast {
+  readonly type: 'success' | 'error' | 'info';
+  readonly content: string;
+}
+
+/**
+ * Response returned from a `card.action.trigger` callback. Returning the
+ * updated card here is the ONLY reliable way to update a card in place:
+ * Feishu applies it before the click spinner stops. A later
+ * `message.patch` can be overwritten by the client because the callback
+ * returned an empty acknowledgement.
+ */
+export interface CardActionResponse {
+  readonly card: {
+    readonly type: 'raw';
+    readonly data: CardJson;
+  };
+  readonly toast?: CardToast;
+}
+
+/** Handler for a card callback; may return an updated card as its ACK. */
+export type CardActionHandler = (
+  action: CardAction,
+) => CardActionResponse | undefined | Promise<CardActionResponse | undefined>;
+
 /** Group membership counts, used for the 1-person-1-bot solo relaxation. */
 export interface ChatStats {
   readonly userCount: number;
@@ -237,7 +263,7 @@ export interface FeishuTransport {
   /** Register the single inbound-message handler (last registration wins). */
   onMessage(handler: (message: FeishuMessage) => void): void;
   /** Register the single card-button handler (last registration wins). */
-  onCardAction(handler: (action: CardAction) => void): void;
+  onCardAction(handler: CardActionHandler): void;
   /** Send a plain text message to a chat. */
   sendText(chatId: string, text: string): Promise<void>;
   /**

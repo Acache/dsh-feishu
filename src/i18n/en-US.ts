@@ -106,6 +106,7 @@ export const enMessages = {
   'card.approval.outcome.rejected': '❌ Rejected',
   'card.approval.outcome.unavailable': '⚠️ Unavailable',
   'card.approval.outcome.cancelled': '⏹ Cancelled',
+  'card.approval.submittedNote': 'The decision was submitted to the host.',
   'card.question.title': '❓ Question',
   'card.question.freeTextHint': 'Reply with your answer as a message — no options to pick from.',
   'card.question.cancel': '✖ Cancel',

@@ -48,6 +48,7 @@ import { CommandRegistry, type CommandResult, parseSlash } from './commands.js';
 import { resolveDirectory } from './directory.js';
 import type {
   CardAction,
+  CardActionResponse,
   CardJson,
   FeishuMessage,
   FeishuTransport,
@@ -625,11 +626,12 @@ export class Bridge {
         options.logger.error(`feishu message handling failed: ${String(error)}`);
       });
     });
-    options.transport.onCardAction((action) => {
-      void this.handleCardAction(action).catch((error: unknown) => {
+    options.transport.onCardAction((action) =>
+      this.handleCardAction(action).catch((error: unknown) => {
         options.logger.error(`feishu card action handling failed: ${String(error)}`);
-      });
-    });
+        return undefined;
+      }),
+    );
     this.disposeEvents = options.onSessionEvent((sessionId, event) => {
       void this.handleEvent(sessionId, event).catch((error: unknown) => {
         options.logger.error(`session event handling failed: ${String(error)}`);
@@ -2188,8 +2190,9 @@ export class Bridge {
    * Route one card button callback. Buttons are the surface's command
    * entry point — no slash message needed (everything-is-a-card).
    * @param action - the normalized card callback.
+   * @returns the updated card for the callback ACK, when one is required.
    */
-  async handleCardAction(action: CardAction): Promise<void> {
+  async handleCardAction(action: CardAction): Promise<CardActionResponse | undefined> {
     // The user allowlist gates card buttons too (a button IS a command —
     // everything-is-a-card); an unlisted operator must not stop turns or
     // answer approvals from an allowed chat.
@@ -2198,7 +2201,7 @@ export class Bridge {
       this.options.logger.info(
         `ignoring card action from user ${action.operatorOpenId}: not in user allowlist`,
       );
-      return;
+      return undefined;
     }
     const kind = action.value.kind;
     this.options.logger.info(
@@ -2253,9 +2256,9 @@ export class Bridge {
       case 'question-submit':
       case 'question-cancel': {
         // Approval/question interactions are handled by the interaction
-        // controller (they settle pending card interactions).
-        await this.interactions.handleCardAction(action);
-        break;
+        // controller (they settle pending card interactions). Approval
+        // decisions return their updated card as the callback ACK.
+        return this.interactions.handleCardAction(action);
       }
       case 'queue-steer':
       case 'queue-edit':
@@ -2271,6 +2274,7 @@ export class Bridge {
         this.options.logger.warn(`unknown card action kind: ${kind ?? '(missing)'}`);
       }
     }
+    return undefined;
   }
 
   /** Register the built-in surface commands. */

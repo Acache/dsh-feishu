@@ -113,11 +113,31 @@ describe('InteractionCardController', () => {
     expect(h.transport.sentCards).toHaveLength(1);
     expect(JSON.stringify(h.transport.sentCards[0]?.elements)).toContain('bash');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    h.controller.handleCardAction(action('approval', { id: 'approval-1', decision: 'allow' }));
+    const ack = await h.controller.handleCardAction(
+      action('approval', { id: 'approval-1', decision: 'allow' }),
+    );
     await expect(pending).resolves.toBe('allowed-once');
-    // The card is settled into its decided state (deferred macrotask).
+    // The decision card is the callback ACK; no later patch may race it.
+    expect(ack?.card.data.header?.title.content).toBe('🔐 Approval');
+    expect(JSON.stringify(ack?.card.data.elements)).toContain('Allowed once');
+    expect(JSON.stringify(ack?.card.data.elements)).toContain('submitted to the host');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(h.transport.updatedCards).toHaveLength(1);
+    expect(h.transport.updatedCards).toHaveLength(0);
+  });
+
+  it('ignores a stale approval callback without claiming the ACK', async () => {
+    const h = makeController();
+    const pending = h.controller.handleApprovalRequest({ agent: h.agent, toolName: 'bash' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const first = await h.controller.handleCardAction(
+      action('approval', { id: 'approval-1', decision: 'allow' }),
+    );
+    expect(first).toBeDefined();
+    const stale = await h.controller.handleCardAction(
+      action('approval', { id: 'approval-1', decision: 'reject' }),
+    );
+    expect(stale).toBeUndefined();
+    await expect(pending).resolves.toBe('allowed-once');
   });
 
   it('settles rejected on Reject and cancelled on abort', async () => {
@@ -140,6 +160,9 @@ describe('InteractionCardController', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     controller.abort();
     await expect(pending2).resolves.toBe('cancelled');
+    // Abort has no callback ACK; the settle path must still patch the card.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(JSON.stringify(h.transport.updatedCards.at(-1)?.elements)).toContain('Cancelled');
   });
 
   it('fails closed when the session has no chat', async () => {

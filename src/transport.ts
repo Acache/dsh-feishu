@@ -27,6 +27,7 @@ import {
 import axios from 'axios';
 import type {
   CardAction,
+  CardActionHandler,
   CardJson,
   ChatStats,
   FeishuMessage,
@@ -279,6 +280,20 @@ export function normalizeCardAction(data: RawCardActionEvent): CardAction | unde
 }
 
 /**
+ * Whether a card callback must return its updated card as the callback ACK.
+ *
+ * Interaction cards settle synchronously and need the visual update applied
+ * before Feishu stops the click spinner. Panel/streaming/queue actions stay
+ * fire-and-forget because their work can exceed Feishu's 3-second callback
+ * deadline; they keep the empty ACK and update by `message.patch`.
+ * @param action - the normalized card callback.
+ * @returns whether the transport should await the handler's card response.
+ */
+export function cardActionNeedsAck(action: CardAction): boolean {
+  return action.value.kind === 'approval';
+}
+
+/**
  * The Feishu transport: long-connection receive + API send/update.
  */
 export class LarkTransport implements FeishuTransport {
@@ -286,7 +301,7 @@ export class LarkTransport implements FeishuTransport {
   private readonly ws: WSClient;
   private readonly dispatcher = new EventDispatcher({});
   private handler: ((message: FeishuMessage) => void) | undefined;
-  private actionHandler: ((action: CardAction) => void) | undefined;
+  private actionHandler: CardActionHandler | undefined;
   private readonly logger: TransportLogger | undefined;
   private botOpenIdValue: string | undefined;
   private readonly statsCache = new Map<string, { stats: ChatStats; at: number }>();
@@ -343,14 +358,25 @@ export class LarkTransport implements FeishuTransport {
         if (message !== undefined) this.handler?.(message);
         return undefined;
       },
-      'card.action.trigger': (data: RawCardActionEvent) => {
+      'card.action.trigger': async (data: RawCardActionEvent) => {
         const action = normalizeCardAction(data);
-        if (action !== undefined) this.actionHandler?.(action);
-        // ACK with no UI update. Returning undefined produces a code-only
-        // response the Feishu client rejects as an invalid ACK (botmux
-        // lesson: the client can then re-render the card to a stale state —
-        // exactly the "card reverted to working after opening details" bug).
-        return {};
+        if (action === undefined) return {};
+        if (!cardActionNeedsAck(action)) {
+          // Fire-and-forget: these actions may take longer than Feishu's
+          // 3-second callback deadline. Their card updates go through
+          // `message.patch` as before.
+          void this.actionHandler?.(action);
+          return {};
+        }
+        // Return the updated card as the callback ACK. Feishu applies it
+        // before stopping the click spinner; an empty ACK can make the
+        // client restore the pre-click card and hide the decision.
+        try {
+          return (await this.actionHandler?.(action)) ?? {};
+        } catch (error: unknown) {
+          this.logger?.warn(`card action ACK failed: ${String(error)}`);
+          return {};
+        }
       },
     });
     await this.ws.start({ eventDispatcher: this.dispatcher });
@@ -455,7 +481,7 @@ export class LarkTransport implements FeishuTransport {
   }
 
   /** Register the single card-button handler (last registration wins). */
-  onCardAction(handler: (action: CardAction) => void): void {
+  onCardAction(handler: CardActionHandler): void {
     this.actionHandler = handler;
   }
 

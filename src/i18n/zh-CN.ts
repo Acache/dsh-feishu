@@ -360,6 +360,7 @@ export const zhMessages: Record<MessageKey, string> = {
   'card.approval.outcome.rejected': '❌ 已拒绝',
   'card.approval.outcome.unavailable': '⚠️ 不可用',
   'card.approval.outcome.cancelled': '⏹ 已取消',
+  'card.approval.submittedNote': '决定已提交给 host。',
 
   // ── Command / surface info feedback ─────────────────────────────────────
   'command.info.exportedEvents': '已导出 {count} 条事件到 {file}。',

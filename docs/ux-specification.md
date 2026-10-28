@@ -206,11 +206,16 @@ id (`think-N` or the tool `callId`), never an index.
 
 `card.action.trigger` is a synchronous callback with a **3 s deadline and
 no re-push**. The handler must ACK with a valid response:
-- return `{}` (valid ACK, no UI update) — **never `undefined`**, which the
-  client rejects as invalid and can then re-render the card to a stale
-  state (the "card reverted to Stop after opening details" bug);
-- card-changing work must be **deferred out of the callback** (macrotask)
-  so the ACK lands before the patch.
+- return `{}` (valid ACK, no UI update) for fire-and-forget actions —
+  **never `undefined`**, which the client rejects as invalid and can then
+  re-render the card to a stale state (the "card reverted to Stop after
+  opening details" bug);
+- interaction cards that settle synchronously return the updated card as
+  `{ card: { type: 'raw', data }, toast? }`. Feishu applies it before the
+  click spinner stops; a separate `message.patch` can be overwritten by the
+  callback ACK. Approval decisions use this path;
+- slow work must be **deferred out of the callback** (macrotask) so the ACK
+  lands within the deadline and before any patch.
 
 ---
 
@@ -276,8 +281,8 @@ rounds 1–5.
 1. Cards start collapsed; the sequence streams while collapsed.
 2. Opening row details never collapses or re-renders the streaming card to
    a stale state (toggle bit untouched; re-assertion deferred).
-3. Card actions ACK `{}` (never `undefined`); card patches are deferred out
-   of the callback.
+3. Card actions ACK `{}` or the updated interaction card (never
+   `undefined`); slow card patches are deferred out of the callback.
 4. Tool summaries never show raw JSON envelopes for long commands.
 5. Details cards show full args/result.
 6. Repo dropdown shows relative paths; picker is consumed after a pick;
@@ -535,9 +540,11 @@ callbacks (wrong chat/card, already settled, superseded card) are ignored.
 callback settles `'allowed-once'` / `'rejected'`; the request `signal`
 abort or a 5-minute timeout settles `'cancelled'`. After a decision the
 card is replaced in place by a static decided card (no buttons — further
-taps do nothing), deferred out of the callback ACK. Failure modes are
-fail-closed `'unavailable'` with a loud log: unknown chat, card send
-failure, or bridge disposal (every pending entry settles `'cancelled'`).
+taps do nothing), returned as the callback ACK together with a
+"submitted to the host" note. Timeout/abort have no callback, so they still
+patch the card. Failure modes are fail-closed `'unavailable'` with a loud
+log: unknown chat, card send failure, or bridge disposal (every pending
+entry settles `'cancelled'`).
 
 ### 9.2 Question card
 
