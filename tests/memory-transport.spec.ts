@@ -6,7 +6,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FeishuMessage } from '../src/feishu/types.js';
+import type { CardAction, FeishuMessage } from '../src/feishu/types.js';
 import { MemoryTransport } from '../src/memory-transport.js';
 
 const SCRATCH = join(process.cwd(), '_dev', 'test-memory-transport');
@@ -95,6 +95,25 @@ describe('MemoryTransport', () => {
     const records = transport.outbox();
     expect(records.map((r) => r.kind)).toEqual(['card', 'patch']);
     expect(records[0]?.messageId).toBe(messageId);
+  });
+
+  it('records the card returned by a callback ACK as a patch', async () => {
+    const transport = new MemoryTransport({ dir: SCRATCH });
+    await transport.start();
+    transport.onCardAction(async () => ({
+      card: { type: 'raw', data: { elements: [{ tag: 'hr' }] } },
+    }));
+    const action: CardAction = {
+      messageId: 'om_card_1',
+      chatId: 'oc_chat',
+      operatorOpenId: 'ou_user',
+      value: { kind: 'approval', decision: 'allow', id: 'approval-1' },
+    };
+    await transport.deliverAction(action);
+    const records = transport.outbox();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ kind: 'patch', messageId: 'om_card_1' });
+    expect(records[0]?.card?.elements).toEqual([{ tag: 'hr' }]);
   });
 
   it('records reaction adds and removals in the outbox (two-stage ack seam)', async () => {

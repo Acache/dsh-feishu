@@ -4044,16 +4044,17 @@ describe('interactive approvals (Iteration 3)', () => {
     const requestId = approvalRequestId(h);
     expect(requestId).not.toBe('');
     // Press Allow via the card callback.
-    await h.bridge.handleCardAction({
+    const ack = await h.bridge.handleCardAction({
       messageId: `msg-${h.transport.sentCards.length}`,
       chatId: 'oc_chat',
       operatorOpenId: 'ou_user',
       value: { kind: 'approval', decision: 'allow', id: requestId },
     });
     await expect(pending).resolves.toBe('allowed-once');
-    // The card is updated to a static decided state.
+    // The decided card is returned as the callback ACK; no patch competes.
+    expect(JSON.stringify(ack?.card.data.elements)).toContain('Allowed once');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(JSON.stringify(h.transport.updatedCards.at(-1)?.elements)).toContain('Allowed once');
+    expect(h.transport.updatedCards).toHaveLength(0);
   });
 
   it('settles rejected on Reject and cancelled on timeout', async () => {

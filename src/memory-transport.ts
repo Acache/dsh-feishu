@@ -27,6 +27,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
   CardAction,
+  CardActionHandler,
   CardJson,
   ChatStats,
   FeishuMessage,
@@ -77,8 +78,9 @@ export interface MemoryOutboxRecord {
  */
 export class MemoryTransport implements FeishuTransport {
   private handler: ((message: FeishuMessage) => void) | undefined;
-  private actionHandler: ((action: CardAction) => void) | undefined;
+  private actionHandler: CardActionHandler | undefined;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private drainingActions = false;
   private readonly botOpenId: string | undefined;
   private readonly stats: ChatStats | undefined;
   private readonly seededAttachments: ReadonlyMap<string, { data: Uint8Array; mediaType?: string }>;
@@ -120,7 +122,7 @@ export class MemoryTransport implements FeishuTransport {
     mkdirSync(this.outboxDir, { recursive: true });
     this.timer = setInterval(() => {
       this.drainInbox();
-      this.drainActions();
+      void this.drainActions();
     }, this.pollIntervalMs);
   }
 
@@ -136,13 +138,19 @@ export class MemoryTransport implements FeishuTransport {
   }
 
   /** Register the single card-button handler (last registration wins). */
-  onCardAction(handler: (action: CardAction) => void): void {
+  onCardAction(handler: CardActionHandler): void {
     this.actionHandler = handler;
   }
 
   /** Deliver a card action directly (same-process) for tests. */
-  deliverAction(action: CardAction): void {
-    this.actionHandler?.(action);
+  async deliverAction(action: CardAction): Promise<void> {
+    const response = await this.actionHandler?.(action);
+    const card = response?.card.data;
+    if (card !== undefined) {
+      // Mirror the real client: the card returned by the callback is applied
+      // to the clicked message before the click settles.
+      this.record({ kind: 'patch', messageId: action.messageId, card });
+    }
   }
 
   /** Record a text send in the outbox. */
@@ -276,23 +284,29 @@ export class MemoryTransport implements FeishuTransport {
   }
 
   /** Deliver every pending action file to the handler, then remove it. */
-  private drainActions(): void {
-    let files: string[];
+  private async drainActions(): Promise<void> {
+    if (this.drainingActions) return;
+    this.drainingActions = true;
     try {
-      files = readdirSync(this.actionsDir).filter((file) => file.endsWith('.json'));
-    } catch {
-      return;
-    }
-    for (const file of files) {
-      const path = join(this.actionsDir, file);
+      let files: string[];
       try {
-        const action = JSON.parse(readFileSync(path, 'utf8')) as CardAction;
-        this.actionHandler?.(action);
+        files = readdirSync(this.actionsDir).filter((file) => file.endsWith('.json'));
       } catch {
-        // Malformed action file: drop it rather than redelivering forever.
-      } finally {
-        rmSync(path, { force: true });
+        return;
       }
+      for (const file of files) {
+        const path = join(this.actionsDir, file);
+        try {
+          const action = JSON.parse(readFileSync(path, 'utf8')) as CardAction;
+          await this.deliverAction(action);
+        } catch {
+          // Malformed action file: drop it rather than redelivering forever.
+        } finally {
+          rmSync(path, { force: true });
+        }
+      }
+    } finally {
+      this.drainingActions = false;
     }
   }
 

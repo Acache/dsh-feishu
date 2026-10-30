@@ -149,8 +149,9 @@ done|stopped|error --any action--->  same (state unchanged; card re-synced)
 
 `card.action.trigger` 是同步回调，具有 **3 秒截止时间且不可重新推送**。处理器必须用有效响应进行 ACK：
 
-- 返回 `{}`（有效 ACK，不更新 UI）—— **绝不能返回 `undefined`**，客户端会将其视为无效而拒绝，并可能把卡片重新渲染到过期状态（"card reverted to Stop after opening details" bug）；
-- 改变卡片的工作必须**延迟到回调之外**（macrotask），使 ACK 先于 patch 到达。
+- fire-and-forget 操作返回 `{}`（有效 ACK，不更新 UI）—— **绝不能返回 `undefined`**，客户端会将其视为无效而拒绝，并可能把卡片重新渲染到过期状态（"card reverted to Stop after opening details" bug）；
+- 同步定案的交互卡片返回更新后的卡片：`{ card: { type: 'raw', data }, toast? }`。飞书会在点击 spinner 停止前应用它；单独的 `message.patch` 可能被回调 ACK 覆盖。审批决策走这条路径；
+- 耗时工作必须**延迟到回调之外**（macrotask），保证 ACK 在截止时间内、且先于任何 patch 到达。
 
 ---
 
@@ -199,7 +200,7 @@ done|stopped|error --any action--->  same (state unchanged; card re-synced)
 
 1. 卡片默认折叠；折叠期间序列持续流式更新。
 2. 打开行详情绝不会折叠流式卡片，也不会将其重新渲染到过期状态（toggle 位不变；重新断言被延迟）。
-3. 卡片操作 ACK `{}`（绝不返回 `undefined`）；卡片 patch 延迟到回调之外。
+3. 卡片操作 ACK `{}` 或更新后的交互卡片（绝不返回 `undefined`）；慢速卡片 patch 延迟到回调之外。
 4. 工具 summary 绝不为长命令显示原始 JSON 包裹。
 5. 详情卡片显示完整参数/结果。
 6. Repo 下拉框显示相对路径；选择后选择器即被消费；过期选择器的回调被忽略。
@@ -291,7 +292,7 @@ harness 的裸 `/plan` 和 `/permission` 形式无法*选择*或*切换*：不�
 
 ### 9.1 审批卡片
 
-`approval/request` → surface 将 agent 映射到其聊天（`sessionMap.chatFor(agent.session.id)`），发布一张**审批卡片**（`🔐 Approval needed`，橙色）：工具名 + 请求者的理由，带 `✅ Allow once`（主按钮）和 `❌ Reject`（危险按钮）。卡片回调定案 `'allowed-once'` / `'rejected'`；请求的 `signal` 中止或 5 分钟超时定案 `'cancelled'`。决策之后，卡片原地替换为一张静态的已决策卡片（无按钮 —— 再点也没有任何作用），延迟到回调 ACK 之外。失败模式为 fail-closed 的 `'unavailable'` 并伴以响亮日志：未知聊天、卡片发送失败或 bridge 销毁（每个待处理条目都定案为 `'cancelled'`）。
+`approval/request` → surface 将 agent 映射到其聊天（`sessionMap.chatFor(agent.session.id)`），发布一张**审批卡片**（`🔐 Approval needed`，橙色）：工具名 + 请求者的理由，带 `✅ Allow once`（主按钮）和 `❌ Reject`（危险按钮）。卡片回调定案 `'allowed-once'` / `'rejected'`；请求的 `signal` 中止或 5 分钟超时定案 `'cancelled'`。决策之后，卡片原地替换为一张静态的已决策卡片（无按钮 —— 再点也没有任何作用），作为回调 ACK 返回，并带一条「已提交给 host」的 note。超时/中止没有回调，仍通过 patch 更新卡片。失败模式为 fail-closed 的 `'unavailable'` 并伴以响亮日志：未知聊天、卡片发送失败或 bridge 销毁（每个待处理条目都定案为 `'cancelled'`）。
 
 ### 9.2 提问卡片
 

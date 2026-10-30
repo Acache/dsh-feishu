@@ -8,6 +8,7 @@ import { Readable } from 'node:stream';
 import type { RawMessageEvent } from '@larksuiteoapi/node-sdk';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  cardActionNeedsAck,
   FEISHU_HTTP,
   FeishuApiError,
   LarkTransport,
@@ -258,6 +259,27 @@ describe('normalizeCardAction', () => {
     expect(
       normalizeCardAction({ open_message_id: 'om_1', open_chat_id: 'oc_1' } as never),
     ).toBeUndefined();
+  });
+});
+
+describe('cardActionNeedsAck', () => {
+  function action(kind: string) {
+    return {
+      messageId: 'om_1',
+      chatId: 'oc_1',
+      operatorOpenId: 'ou_1',
+      value: { kind },
+    };
+  }
+
+  it('requires a card ACK for approval decisions', () => {
+    expect(cardActionNeedsAck(action('approval'))).toBe(true);
+  });
+
+  it('keeps fire-and-forget actions on the empty ACK', () => {
+    for (const kind of ['panel', 'panel-page', 'stop', 'question', 'question-toggle']) {
+      expect(cardActionNeedsAck(action(kind))).toBe(false);
+    }
   });
 });
 

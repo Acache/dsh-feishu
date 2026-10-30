@@ -1374,13 +1374,22 @@ export function buildApprovalDecidedCard(outcome: string): CardJson {
         : outcome === 'unavailable'
           ? t('card.approval.outcome.unavailable')
           : t('card.approval.outcome.cancelled');
+  const elements: CardElement[] = [
+    { tag: 'note', elements: [{ tag: 'plain_text', content: label }] },
+  ];
+  if (outcome === 'allowed-once' || outcome === 'rejected') {
+    elements.push({
+      tag: 'note',
+      elements: [{ tag: 'plain_text', content: t('card.approval.submittedNote') }],
+    });
+  }
   return {
     config: { wide_screen_mode: true },
     header: {
       title: { tag: 'plain_text', content: t('card.approval.doneTitle') },
       template: 'wathet',
     },
-    elements: [{ tag: 'note', elements: [{ tag: 'plain_text', content: label }] }],
+    elements,
   };
 }
 
