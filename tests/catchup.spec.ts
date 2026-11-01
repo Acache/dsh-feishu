@@ -81,7 +81,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport,
       store,
-      deliver: (m) => { delivered.push(m.messageId); },
+      deliver: (m) => {
+        delivered.push(m.messageId);
+      },
       now: () => NOW,
     });
     expect(await catchup.run(['oc_test'])).toBe(0);
@@ -105,7 +107,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport,
       store,
-      deliver: (m) => { delivered.push(m.messageId); },
+      deliver: (m) => {
+        delivered.push(m.messageId);
+      },
       now: () => NOW,
     });
     expect(await catchup.run(['oc_test'])).toBe(2);
@@ -146,7 +150,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport: singlePage(items),
       store,
-      deliver: (m) => { delivered.push(m.messageId); },
+      deliver: (m) => {
+        delivered.push(m.messageId);
+      },
       maxMessages: 10,
       followUpDelayMs: 5,
       now: () => NOW,
@@ -203,7 +209,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport,
       store,
-      deliver: (m) => { delivered.push(m.messageId); },
+      deliver: (m) => {
+        delivered.push(m.messageId);
+      },
       now: () => NOW,
     });
     expect(await catchup.run(['oc_test'])).toBe(1);
@@ -246,7 +254,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport,
       store,
-      deliver: (m) => { delivered.push(m.messageId); },
+      deliver: (m) => {
+        delivered.push(m.messageId);
+      },
       maxMessages: 1,
       now: () => NOW,
     });
@@ -293,7 +303,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport,
       store,
-      deliver: (m) => { delivered.push(m.messageId); },
+      deliver: (m) => {
+        delivered.push(m.messageId);
+      },
       maxMessages: 1,
       rerunDelayMs: 5,
       followUpDelayMs: 5,
@@ -370,7 +382,9 @@ describe('catch-up scan semantics', () => {
     const catchup = new Catchup({
       transport: singlePage(items),
       store,
-      deliver: (m) => { first.push(m.messageId); },
+      deliver: (m) => {
+        first.push(m.messageId);
+      },
       maxMessages: 1,
       now: () => NOW,
     });
@@ -388,7 +402,9 @@ describe('catch-up scan semantics', () => {
     const catchup2 = new Catchup({
       transport: singlePage(items),
       store: reloaded,
-      deliver: (m) => { second.push(m.messageId); },
+      deliver: (m) => {
+        second.push(m.messageId);
+      },
       now: () => NOW,
     });
     try {
